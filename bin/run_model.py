@@ -13,7 +13,7 @@ from utils.io import print_graph_stats, read_params, create_default_path, remove
 
 from core.data.constants import GRAPH, N_RELS, N_CLASSES, N_ENTITIES
 from core.models.constants import NODE_CLASSIFICATION, GRAPH_CLASSIFICATION
-from core.models.constants import AIFB, MUTAG, MUTAGENICITY, PTC_FM, PTC_FR, PTC_MM, PTC_MR
+from core.models.constants import AIFB, MUTAG, MUTAGENICITY, PTC_FM, PTC_FR, PTC_MM, PTC_MR, DPD
 from core.models.model import Model
 from core.app import App
 
@@ -33,15 +33,14 @@ def main(args):
         cuda = True
         torch.cuda.set_device(args.gpu)
 
-    default_path = create_default_path()
-    print('\n*** Set default saving/loading path to:', default_path)
+    
 
     if args.dataset == AIFB or args.dataset == MUTAG:
         module = importlib.import_module(MODULE.format('dglrgcn'))
         data = module.load_dglrgcn(args.data_path)
         data = to_cuda(data) if cuda else data
         mode = NODE_CLASSIFICATION
-    elif args.dataset == MUTAGENICITY or args.dataset == PTC_MR or args.dataset == PTC_MM or args.dataset == PTC_FR or args.dataset == PTC_FM:
+    elif args.dataset == MUTAGENICITY or args.dataset == PTC_MR or args.dataset == PTC_MM or args.dataset == PTC_FR or args.dataset == PTC_FM or args.dataset == DPD:
         module = importlib.import_module(MODULE.format('dortmund'))
         data = module.load_dortmund(args.data_path)
         data = to_cuda(data) if cuda else data
@@ -50,6 +49,9 @@ def main(args):
         raise ValueError('Unable to load dataset', args.dataset)
 
     print_graph_stats(data[GRAPH])
+
+    default_path = args.data_path + "model.gnn"
+    print('\n*** Set default saving/loading path to:', default_path)
 
     config_params = read_params(args.config_fpath, verbose=True)
 
@@ -67,16 +69,18 @@ def main(args):
 
     # 1. Training
     app = App()
+    app.model = model
     learning_config = {'lr': args.lr, 'n_epochs': args.n_epochs, 'weight_decay': args.weight_decay, 'batch_size': args.batch_size, 'cuda': cuda}
-    print('\n*** Start training ***\n')
-    app.train(data, config_params[0], learning_config, default_path, mode=mode)
+    if (args.type == "train"):
+        print('\n*** Start training ***\n')
+        app.train(data, config_params[0], learning_config, default_path, mode=mode)
 
-    # 2. Testing
-    print('\n*** Start testing ***\n')
-    app.test(data, default_path, mode=mode)
-
-    # 3. Delete model
-    remove_model(default_path)
+    if (args.type == "validate"):
+        print('\n*** Start validation ***\n')
+        app.validate(data, default_path, mode=mode)
+    else:
+        print('\n*** Start testing ***\n')
+        app.test(data, default_path, mode=mode)
 
 
 if __name__ == '__main__':
@@ -94,6 +98,7 @@ if __name__ == '__main__':
     parser.add_argument("--weight-decay", type=float, default=5e-4,
                         help="Weight for L2 loss")
     parser.add_argument("--batch-size", type=int, default=16, help="batch size (only for graph classification)")
+    parser.add_argument("--type", type=str, required=True, help="train or validation")
 
     args = parser.parse_args()
 

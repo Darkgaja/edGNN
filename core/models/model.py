@@ -11,6 +11,7 @@ import dgl
 from dgl import DGLGraph
 from core.utils import compute_node_degrees
 from core.models.constants import NODE_CLASSIFICATION, GRAPH_CLASSIFICATION, GNN_EDGE_LABELS_KEY, GNN_NODE_LABELS_KEY
+from core.models.F1Loss import F1_Loss
 
 MODULE = "core.models.layers.{}"
 LAYER_MODULES = {
@@ -172,7 +173,8 @@ class Model(nn.Module):
         if isinstance(self.embed_nodes, nn.Embedding):
             node_features = self.embed_nodes(self.g.ndata[GNN_NODE_LABELS_KEY])
         elif isinstance(self.embed_nodes, torch.Tensor):
-            node_features = self.embed_nodes[self.g.ndata[GNN_NODE_LABELS_KEY]]
+            dat = self.g.ndata[GNN_NODE_LABELS_KEY].type('torch.LongTensor')
+            node_features = self.embed_nodes[dat]
         else:
             node_features = torch.zeros(self.g.number_of_nodes(), self.node_dim)
         node_features = node_features.cuda() if self.is_cuda else node_features
@@ -181,7 +183,8 @@ class Model(nn.Module):
         if isinstance(self.embed_edges, nn.Embedding):
             edge_features = self.embed_edges(self.g.edata[GNN_EDGE_LABELS_KEY])
         elif isinstance(self.embed_edges, torch.Tensor):
-            edge_features = self.embed_edges[self.g.edata[GNN_EDGE_LABELS_KEY]]
+            dat = self.g.edata[GNN_EDGE_LABELS_KEY].type('torch.LongTensor')
+            edge_features = self.embed_edges[dat]
         else:
             edge_features = None
 
@@ -221,11 +224,35 @@ class Model(nn.Module):
 
     def eval_graph_classification(self, labels, testing_graphs):
         self.eval()
+        #loss_fcn = F1_Loss()
         loss_fcn = torch.nn.CrossEntropyLoss()
         with torch.no_grad():
             logits = self(testing_graphs)
             loss = loss_fcn(logits, labels)
             _, indices = torch.max(logits, dim=1)
             correct = torch.sum(indices == labels)
-            return correct.item() * 1.0 / len(labels), loss
+
+            labelItem = labels.numpy()
+            indicesItem = indices.numpy()
+
+            truePos = 0
+            totalPredPos = 0
+            totalActualPos = 0
+
+            for i in range(len(labelItem)):
+                label = labelItem[i]
+                index = indicesItem[i]
+                if (label == 0):
+                    totalActualPos += 1
+                    if (index == 0):
+                        truePos += 1
+                if (index == 0):
+                    totalPredPos += 1
+
+            if (totalActualPos == 0):
+                totalActualPos = 1
+            if (totalPredPos == 0):
+                totalPredPos = 1
+
+            return correct.item() * 1.0 / len(labels), truePos / totalPredPos, truePos / totalActualPos, loss
 

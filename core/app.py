@@ -12,6 +12,7 @@ from core.data.constants import LABELS, TRAIN_MASK, TEST_MASK, VAL_MASK, GRAPH
 from core.models.constants import NODE_CLASSIFICATION, GRAPH_CLASSIFICATION
 from core.models.model import Model
 from core.data.constants import GRAPH, N_RELS, N_CLASSES, N_ENTITIES
+from core.models.F1Loss import F1_Loss
 
 
 def collate(samples):
@@ -28,6 +29,7 @@ class App:
 
     def train(self, data, model_config, learning_config, save_path='', mode=NODE_CLASSIFICATION):
 
+        #loss_fcn = F1_Loss()
         loss_fcn = torch.nn.CrossEntropyLoss()
 
         labels = data[LABELS]
@@ -80,7 +82,10 @@ class App:
                     break
 
         elif mode == GRAPH_CLASSIFICATION:
-            self.accuracies = np.zeros(10)
+            K = 3
+            self.accuracies = np.zeros(K)
+            self.recall = np.zeros(K)
+            self.precision = np.zeros(K)
             graphs = data[GRAPH]                 # load all the graphs
 
             # debug purposes: reshuffle all the data before the splitting
@@ -89,7 +94,7 @@ class App:
             graphs = [graphs[i] for i in random_indices]
             labels = labels[random_indices]
 
-            K = 10
+            
             for k in range(K):                  # K-fold cross validation
 
                 # create GNN model
@@ -112,6 +117,8 @@ class App:
                 start = int(len(graphs)/K) * k
                 end = int(len(graphs)/K) * (k+1)
 
+                print(str(start) + ":" + str(end))
+
                 # testing batch
                 testing_graphs = graphs[start:end]
                 self.testing_labels = labels[start:end]
@@ -119,7 +126,9 @@ class App:
 
                 # training batch
                 training_graphs = graphs[:start] + graphs[end:]
+                
                 training_labels = labels[list(range(0, start)) + list(range(end+1, len(graphs)))]
+
                 training_samples = list(map(list, zip(training_graphs, training_labels)))
                 training_batches = DataLoader(training_samples,
                                               batch_size=learning_config['batch_size'],
@@ -139,26 +148,31 @@ class App:
                         losses.append(loss.item())
                         _, indices = torch.max(logits, dim=1)
                         correct = torch.sum(indices == label)
-                        training_accuracies.append(correct.item() * 1.0 / len(label))
 
+                        training_accuracies.append(correct.item() * 1.0 / len(label))
+                        
                         optimizer.zero_grad()
                         loss.backward()
                         optimizer.step()
 
                     if epoch >= 3:
                         dur.append(time.time() - t0)
-                    val_acc, val_loss = self.model.eval_graph_classification(self.testing_labels, self.testing_batch)
+                    val_acc, val_precision, val_recall, val_loss = self.model.eval_graph_classification(self.testing_labels, self.testing_batch)
                     print("Epoch {:05d} | Time(s) {:.4f} | Train acc {:.4f} | Train loss {:.4f} "
-                          "| Val accuracy {:.4f} | Val loss {:.4f}".format(epoch,
+                          "| Val accuracy {:.4f} | Val precision {:.4f} | Val recall {:.4f} | Val loss {:.4f}".format(epoch,
                                                                            np.mean(dur) if dur else 0,
                                                                            np.mean(training_accuracies),
                                                                            np.mean(losses),
                                                                            val_acc,
+                                                                           val_precision,
+                                                                           val_recall,
                                                                            val_loss))
 
                     is_better = self.early_stopping(val_loss, self.model, save_path)
                     if is_better:
                         self.accuracies[k] = val_acc
+                        self.recall[k] = val_recall
+                        self.precision[k] = val_precision
 
                     if self.early_stopping.early_stop:
                         print("Early stopping")
@@ -167,21 +181,69 @@ class App:
         else:
             raise RuntimeError
 
-    def test(self, data, load_path='', mode=NODE_CLASSIFICATION):
+    def validate(self, data, load_path, mode=GRAPH_CLASSIFICATION):
 
         try:
             print('*** Load pre-trained model ***')
             self.model = load_checkpoint(self.model, load_path)
         except ValueError as e:
             print('Error while loading the model.', e)
+            return
+
+        if mode == GRAPH_CLASSIFICATION:
+            labels = data[LABELS]
+            size = labels.numpy().size
+            print('Loaded {0} graphs'.format(size))
+            self.accuracies = []
+            self.recall = []
+            self.precision = []
+            graphs = data[GRAPH]
+            batches = dgl.batch(graphs)
+
+            acc, precision, recall, _ = self.model.eval_graph_classification(labels, batches)
+            self.accuracies.append(acc)
+            self.recall.append(recall)
+            self.precision.append(precision)
+        else:
+            return
+
+        acc = np.mean(self.accuracies)
+        recall = np.mean(self.recall)
+        precision = np.mean(self.precision)
+
+        print("\nTest Accuracy {:.4f}".format(acc))
+        print("Test Precision {:.4f}".format(precision))
+        print("Test Recall {:.4f}".format(recall))
+        if recall == 0:
+            f1 = 0
+        else:
+            f1 = 2 * (precision * recall) / (precision + recall)
+        print("Test F1 Score {:.4f}".format(f1))
+
+    def test(self, data, load_path='', mode=NODE_CLASSIFICATION):
 
         if mode == NODE_CLASSIFICATION:
+            try:
+                print('*** Load pre-trained model ***')
+                self.model = load_checkpoint(self.model, load_path)
+            except ValueError as e:
+                print('Error while loading the model.', e)
+
             test_mask = data[TEST_MASK]
             labels = data[LABELS]
             acc, _ = self.model.eval_node_classification(labels, test_mask)
         else:
             acc = np.mean(self.accuracies)
+            recall = np.mean(self.recall)
+            precision = np.mean(self.precision)
 
         print("\nTest Accuracy {:.4f}".format(acc))
+        print("Test Precision {:.4f}".format(precision))
+        print("Test Recall {:.4f}".format(recall))
+        if recall == 0:
+            f1 = 0
+        else:
+            f1 = 2 * (recall * precision) / (recall + precision)
+        print("Test F1 Score {:.4f}".format(f1))
 
         return acc

@@ -54,16 +54,16 @@ def preprocess_dortmund(*, dataset, out_folder):
     """
     DATASET_PATH = complete_path(out_folder, 'dataset.zip')
 
-    dataset_url = "".join([BASE_URL, dataset.upper(), EXTENSION])
-    r = requests.get(dataset_url, allow_redirects=True)
-    r.raise_for_status()
+    # dataset_url = "".join([BASE_URL, dataset.upper(), EXTENSION])
+    # r = requests.get(dataset_url, allow_redirects=True)
+    # r.raise_for_status()
 
-    with open(DATASET_PATH, 'wb') as fhandle:
-        fhandle.write(r.content)
+    # with open(DATASET_PATH, 'wb') as fhandle:
+    #     fhandle.write(r.content)
 
     EXTRACT_FOLDER = complete_path(out_folder, 'unzipped')
-    with zipfile.ZipFile(DATASET_PATH, "r") as zip_ref:
-        zip_ref.extractall(EXTRACT_FOLDER)
+    # with zipfile.ZipFile(DATASET_PATH, "r") as zip_ref:
+    #     zip_ref.extractall(EXTRACT_FOLDER)
 
     d = os.listdir(EXTRACT_FOLDER)
     if len(d) != 1:
