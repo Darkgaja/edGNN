@@ -94,8 +94,15 @@ class App:
             graphs = [graphs[i] for i in random_indices]
             labels = labels[random_indices]
 
+            # Create holdout set
+            TESTSIZE = int(0.3 * len(graphs))
+            test_graphs = graphs[:TESTSIZE]
+            test_labels = labels[:TESTSIZE]
+            graphs = graphs[TESTSIZE:]
+            labels = labels[TESTSIZE:]
+
             
-            for k in range(K):                  # K-fold cross validation
+            for k in range(K): # K-fold cross validation
 
                 # create GNN model
                 self.model = Model(g=data[GRAPH],
@@ -178,38 +185,48 @@ class App:
                         print("Early stopping")
                         break
                 self.early_stopping.reset()
+            
+            # Starting test on holdout set
+            data[LABELS] = test_labels
+            data[GRAPH] = test_graphs
+            self.validate(data, None)
+            
         else:
             raise RuntimeError
 
     def validate(self, data, load_path, mode=GRAPH_CLASSIFICATION):
 
-        try:
-            print('*** Load pre-trained model ***')
-            self.model = load_checkpoint(self.model, load_path)
-        except ValueError as e:
-            print('Error while loading the model.', e)
-            return
+        if (load_path != None):
+            try:
+                print('*** Load pre-trained model ***')
+                self.model = load_checkpoint(self.model, load_path)
+            except ValueError as e:
+                print('Error while loading the model.', e)
+                return
+
+        print('*** Start testing***\n')
 
         if mode == GRAPH_CLASSIFICATION:
             labels = data[LABELS]
             size = labels.numpy().size
-            print('Loaded {0} graphs'.format(size))
-            self.accuracies = []
-            self.recall = []
-            self.precision = []
+            class_size = size - labels.numpy().sum() 
+            print('Loaded {0} graphs (Class:{1}) for validation'.format(size, class_size))
+            self.val_accuracies = []
+            self.val_recall = []
+            self.val_precision = []
             graphs = data[GRAPH]
             batches = dgl.batch(graphs)
 
             acc, precision, recall, _ = self.model.eval_graph_classification(labels, batches)
-            self.accuracies.append(acc)
-            self.recall.append(recall)
-            self.precision.append(precision)
+            self.val_accuracies.append(acc)
+            self.val_recall.append(recall)
+            self.val_precision.append(precision)
         else:
             return
 
-        acc = np.mean(self.accuracies)
-        recall = np.mean(self.recall)
-        precision = np.mean(self.precision)
+        acc = np.mean(self.val_accuracies)
+        recall = np.mean(self.val_recall)
+        precision = np.mean(self.val_precision)
 
         print("\nTest Accuracy {:.4f}".format(acc))
         print("Test Precision {:.4f}".format(precision))
@@ -236,6 +253,8 @@ class App:
             acc = np.mean(self.accuracies)
             recall = np.mean(self.recall)
             precision = np.mean(self.precision)
+
+        print("Mean cross validation testing results:")
 
         print("\nTest Accuracy {:.4f}".format(acc))
         print("Test Precision {:.4f}".format(precision))

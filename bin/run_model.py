@@ -76,10 +76,8 @@ def main(args):
         app.train(data, config_params[0], learning_config, default_path, mode=mode)
 
     if (args.type == "validate"):
-        print('\n*** Start validation ***\n')
         app.validate(data, default_path, mode=mode)
     else:
-        print('\n*** Start testing ***\n')
         app.test(data, default_path, mode=mode)
 
 
