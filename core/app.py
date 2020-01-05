@@ -6,7 +6,7 @@ from torch.utils.data import DataLoader
 import random
 
 from utils.early_stopping import EarlyStopping
-from utils.io import load_checkpoint
+from utils.io import load_checkpoint, save_checkpoint
 
 from core.data.constants import LABELS, TRAIN_MASK, TEST_MASK, VAL_MASK, GRAPH
 from core.models.constants import NODE_CLASSIFICATION, GRAPH_CLASSIFICATION
@@ -101,6 +101,7 @@ class App:
             graphs = graphs[TESTSIZE:]
             labels = labels[TESTSIZE:]
 
+            model_dict = dict()
             
             for k in range(K): # K-fold cross validation
 
@@ -180,12 +181,17 @@ class App:
                         self.accuracies[k] = val_acc
                         self.recall[k] = val_recall
                         self.precision[k] = val_precision
+                        model_dict[val_loss] = self.model
 
                     if self.early_stopping.early_stop:
                         print("Early stopping")
                         break
                 self.early_stopping.reset()
             
+            # Load best performing model
+            self.model = model_dict[min(model_dict.keys())]
+            save_checkpoint(self.model, save_path)
+
             # Starting test on holdout set
             data[LABELS] = test_labels
             data[GRAPH] = test_graphs
@@ -211,27 +217,17 @@ class App:
             size = labels.numpy().size
             class_size = size - labels.numpy().sum() 
             print('Loaded {0} graphs (Class:{1}) for validation'.format(size, class_size))
-            self.val_accuracies = []
-            self.val_recall = []
-            self.val_precision = []
             graphs = data[GRAPH]
             batches = dgl.batch(graphs)
 
             acc, precision, recall, _ = self.model.eval_graph_classification(labels, batches)
-            self.val_accuracies.append(acc)
-            self.val_recall.append(recall)
-            self.val_precision.append(precision)
         else:
             return
-
-        acc = np.mean(self.val_accuracies)
-        recall = np.mean(self.val_recall)
-        precision = np.mean(self.val_precision)
 
         print("\nTest Accuracy {:.4f}".format(acc))
         print("Test Precision {:.4f}".format(precision))
         print("Test Recall {:.4f}".format(recall))
-        if recall == 0:
+        if recall == 0 and precision == 0:
             f1 = 0
         else:
             f1 = 2 * (precision * recall) / (precision + recall)
@@ -254,7 +250,7 @@ class App:
             recall = np.mean(self.recall)
             precision = np.mean(self.precision)
 
-        print("Mean cross validation testing results:")
+        print("\nMean cross validation testing results:")
 
         print("\nTest Accuracy {:.4f}".format(acc))
         print("Test Precision {:.4f}".format(precision))
