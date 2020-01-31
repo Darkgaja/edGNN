@@ -25,7 +25,7 @@ class App:
 
     def __init__(self, early_stopping=True):
         if early_stopping:
-            self.early_stopping = EarlyStopping(patience=100, verbose=True)
+            self.early_stopping = EarlyStopping(patience=10, verbose=True)
 
     def train(self, data, model_config, learning_config, save_path='', mode=NODE_CLASSIFICATION):
 
@@ -82,7 +82,7 @@ class App:
                     break
 
         elif mode == GRAPH_CLASSIFICATION:
-            K = 3
+            K = 5
             self.accuracies = np.zeros(K)
             self.recall = np.zeros(K)
             self.precision = np.zeros(K)
@@ -94,14 +94,22 @@ class App:
             graphs = [graphs[i] for i in random_indices]
             labels = labels[random_indices]
 
+            DO_TEST = True
+
             # Create holdout set
-            TESTSIZE = int(0.3 * len(graphs))
+            HOLDOUT = 0.3 if DO_TEST else 0.0
+            TESTSIZE = int(HOLDOUT * len(graphs))
             test_graphs = graphs[:TESTSIZE]
             test_labels = labels[:TESTSIZE]
             graphs = graphs[TESTSIZE:]
             labels = labels[TESTSIZE:]
 
-            model_dict = dict()
+            best_model = None
+            best_loss = 10000.0
+            best_train_losses = []
+            best_val_losses = []
+
+            print('Starting {0}-fold cross validation'.format(K))
             
             for k in range(K): # K-fold cross validation
 
@@ -121,12 +129,10 @@ class App:
                 if learning_config['cuda']:
                     self.model.cuda()
 
-                print('\n\n\nProcess new k')
                 start = int(len(graphs)/K) * k
                 end = int(len(graphs)/K) * (k+1)
-
-                print(str(start) + ":" + str(end))
-
+                print('\n\n\nProcess new k={0} from {1} to {2}'.format(k + 1, start, end))
+                
                 # testing batch
                 testing_graphs = graphs[start:end]
                 self.testing_labels = labels[start:end]
@@ -144,6 +150,8 @@ class App:
                                               collate_fn=collate)
 
                 dur = []
+                train_losses = []
+                val_losses = []
                 for epoch in range(learning_config['n_epochs']):
                     self.model.train()
                     if epoch >= 3:
@@ -177,28 +185,45 @@ class App:
                                                                            val_loss))
 
                     is_better = self.early_stopping(val_loss, self.model, save_path)
+                    train_losses.append(np.mean(losses))
+                    val_losses.append(val_loss)
+
+                    if val_loss < best_loss:
+                        best_loss = val_loss
+                        best_train_losses = train_losses
+                        best_val_losses = val_losses
+                        best_model = self.model
+
                     if is_better:
                         self.accuracies[k] = val_acc
                         self.recall[k] = val_recall
                         self.precision[k] = val_precision
-                        model_dict[val_loss] = self.model
 
                     if self.early_stopping.early_stop:
                         print("Early stopping")
                         break
                 self.early_stopping.reset()
             
-            # Load best performing model
-            self.model = model_dict[min(model_dict.keys())]
+            # Get best performing model and save it for later
+            self.model = best_model
             save_checkpoint(self.model, save_path)
 
+            self.showLosses(best_train_losses, best_val_losses)
+
             # Starting test on holdout set
-            data[LABELS] = test_labels
-            data[GRAPH] = test_graphs
-            self.validate(data, None)
+            if DO_TEST:
+                data[LABELS] = test_labels
+                data[GRAPH] = test_graphs
+                self.validate(data, None)
             
         else:
             raise RuntimeError
+
+    def showLosses(self, train_losses, val_losses):
+        print("\n*** Loss function on best model (train loss, val loss) ***")
+        for epoch, loss in enumerate(train_losses):
+            print("Epoch {}: {:.4f}, {:.4f}".format(epoch, loss, val_losses[epoch]))
+        print("")
 
     def validate(self, data, load_path, mode=GRAPH_CLASSIFICATION):
 
@@ -227,10 +252,7 @@ class App:
         print("\nTest Accuracy {:.4f}".format(acc))
         print("Test Precision {:.4f}".format(precision))
         print("Test Recall {:.4f}".format(recall))
-        if recall == 0 and precision == 0:
-            f1 = 0
-        else:
-            f1 = 2 * (precision * recall) / (precision + recall)
+        f1 = self.calcF1(recall, precision)
         print("Test F1 Score {:.4f}".format(f1))
 
     def test(self, data, load_path='', mode=NODE_CLASSIFICATION):
@@ -255,10 +277,13 @@ class App:
         print("\nTest Accuracy {:.4f}".format(acc))
         print("Test Precision {:.4f}".format(precision))
         print("Test Recall {:.4f}".format(recall))
-        if recall == 0:
-            f1 = 0
-        else:
-            f1 = 2 * (recall * precision) / (recall + precision)
+        f1 = self.calcF1(recall, precision)
         print("Test F1 Score {:.4f}".format(f1))
 
         return acc
+
+    def calcF1(self, recall, precision):
+        if recall == 0 and precision == 0:
+            return 0
+        else:
+            return 2 * (recall * precision) / (recall + precision)

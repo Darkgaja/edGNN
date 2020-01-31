@@ -254,5 +254,8 @@ class Model(nn.Module):
             if (totalPredPos == 0):
                 totalPredPos = 1
 
-            return correct.item() * 1.0 / len(labels), truePos / totalPredPos, truePos / totalActualPos, loss
+            precision = truePos / totalPredPos
+            recall = truePos / totalActualPos
+
+            return correct.item() * 1.0 / len(labels), precision, recall, loss
 
